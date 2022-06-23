@@ -1,33 +1,37 @@
 use anyhow::Result;
+use std::future::Future;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::collections::BTreeMap;
+use crate::Response;
+use crate::Route;
+use crate::route::{Handler, Method};
+use futures::future::BoxFuture;
 
-type Handler<T> = fn(String, T);
-
-pub struct Router<T>
-{
-    routes: BTreeMap<String, fn(String, T) -> ()>,
-}
-
-#[derive(Clone)]
-pub struct State {
-
+pub struct Router<T> {
+    routes: Vec<Route<T>>,
+    state: T,
 }
 
 impl<T> Router<T>
 where 
-    T: Clone + Send + Sync,
+    T: Clone + Send + Sync + 'static,
 {
-    pub fn new() -> Self {
+    pub fn new(state: T) -> Self {
         Self {
-            routes: BTreeMap::new(),
+            routes: vec![],
+            state,
         }
     }
 
-    pub fn route<S>(&mut self, path: S, handler: Handler<T>)
-        where S: AsRef<str>
+    pub fn get<S, Fut, H>(&mut self, path: S, handler: H)
+    where 
+        S: AsRef<str>,
+        H: Fn(String, T) -> Fut + 'static,
+        Fut: Future<Output = Result<Response, Box<dyn std::error::Error>>> + 'static
     {
-        self.routes.insert(path.as_ref().to_string(), handler);
+        let handler: Handler<T> = Box::new(move |req, state| Box::new(handler(req, state)));
+        let route = Route::new(path, Method::Get, handler);
+        self.routes.push(route);
     }
 
     pub async fn run<S>(&self, addr: S) -> Result<()>
@@ -54,19 +58,6 @@ where
 async fn client_event_loop(stream: TcpStream) -> Result<()> {
     loop {
     }
-
-    Ok(())
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let mut router: Router<State> = Router::new();
-
-    router.route("/hello/world", |req, state| {
-
-    });
-
-    router.run("127.0.0.1:6795").await?;
 
     Ok(())
 }
