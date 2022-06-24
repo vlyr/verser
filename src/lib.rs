@@ -7,7 +7,6 @@ pub use router::Router;
 
 pub mod route;
 pub use route::Route;
-use std::future::Future;
 
 #[derive(Debug, Clone)]
 pub struct Response {
@@ -16,18 +15,20 @@ pub struct Response {
 
 impl Response {
     pub fn json<T>(data: T) -> Self
-        where T: Serialize
+    where
+        T: Serialize,
     {
         Self {
-            content: serde_json::to_string(&data).unwrap()
+            content: serde_json::to_string(&data).unwrap(),
         }
     }
 
-    pub fn raw_text<T>(data: T) -> Self 
-        where T: AsRef<str>
+    pub fn raw_text<T>(data: T) -> Self
+    where
+        T: AsRef<str>,
     {
         Self {
-            content: data.as_ref().into()
+            content: data.as_ref().into(),
         }
     }
 }
@@ -49,11 +50,13 @@ mod tests {
 
         let mut router = Router::new(state.clone());
 
-        router.get("/hello/world", |req, state| async move {
-            Ok(Response::json(state.lock().await.num))
+        router.get("/", async move |req, state| {
+            let mut state = state.lock().await;
+            state.num += 1;
+
+            Ok(Response::json(state.num))
         });
 
         router.run("127.0.0.1:6795").await.unwrap();
     }
 }
-
