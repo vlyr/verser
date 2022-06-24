@@ -8,6 +8,8 @@ pub use router::Router;
 pub mod route;
 pub use route::Route;
 
+pub mod core;
+
 #[derive(Debug, Clone)]
 pub struct Response {
     pub content: String,
@@ -51,6 +53,8 @@ mod tests {
         let mut router = Router::new(state.clone());
 
         router.get("/", async move |req, state| {
+            println!("{:#?}", req);
+
             let mut state = state.lock().await;
             state.num += 1;
 

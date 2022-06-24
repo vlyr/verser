@@ -9,7 +9,8 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    route::{Handler, Method},
+    core::{Method, Request},
+    route::Handler,
     Response, Route,
 };
 
@@ -42,7 +43,7 @@ where
     pub fn get<S, Fut, H>(&mut self, path: S, handler: H)
     where
         S: AsRef<str>,
-        H: Fn(String, T) -> Fut + 'static + Send + Sync,
+        H: Fn(Request, T) -> Fut + 'static + Send + Sync,
         Fut: Future<Output = Result<Response, Box<dyn std::error::Error>>> + 'static + Send,
     {
         let handler: Handler<T> = Box::new(move |req, state| Box::new(handler(req, state)));
@@ -89,33 +90,36 @@ async fn client_handler<T>(
 where
     T: Send + Sync + 'static + Clone,
 {
-    let mut buf = vec![0; 2048];
+    let mut buf = vec![0; 1024];
     stream.read(&mut buf).await?;
+
+    buf.retain(|byte| *byte != u8::MIN);
+
     let buffer = String::from_utf8(buf)?;
 
-    let mut lines = buffer.split("\n");
-    let line = lines.next().unwrap();
+    if let Some(req) = Request::from_raw(buffer) {
+        match router_state
+            .routes
+            .iter()
+            .find(|r| r.identifier() == req.identifier())
+        {
+            Some(route) => {
+                let response = route.exec(req, user_state.clone()).await;
+                let resp = "HTTP/1.1 200 OK\r\nContent-Type:text/html;charset=utf-8\r\n\r\n";
 
-    let mut header_line = line.splitn(3, " ");
+                stream
+                    .write(format!("{}{}\r\n\r\n", resp, response.content).as_bytes())
+                    .await?;
+                stream.flush().await?;
+            }
 
-    let method = header_line.next().unwrap();
-    let path = header_line.next().unwrap();
-    let http_version = header_line.next().unwrap();
+            None => {
+                let resp = "HTTP/1.1 404 Not Found\r\nContent-Type:text/html;charset=utf-8\r\n\r\n";
 
-    println!("{} {}", method, path);
-
-    if let Some(route) = router_state
-        .routes
-        .iter()
-        .find(|r| r.identifier() == format!("{} {}", method, path))
-    {
-        let response = route.exec(buffer, user_state.clone()).await;
-        let resp = "HTTP/1.1 200 OK\r\nContent-Type:text/html;charset=utf-8\r\n\r\n";
-
-        stream
-            .write(format!("{}{}\r\n\r\n", resp, response.content).as_bytes())
-            .await?;
-        stream.flush().await?;
+                stream.write(resp.as_bytes()).await?;
+                stream.flush().await?;
+            }
+        }
     }
 
     Ok(())
