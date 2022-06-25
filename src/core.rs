@@ -1,4 +1,13 @@
+use serde::Serialize;
 use std::collections::HashMap;
+use std::error::Error;
+use std::future::Future;
+
+pub type RouteHandler<T> = Box<dyn Fn(Request, T) -> RouteHandlerResult + Send + Sync>;
+pub type RouteHandlerResult = Box<dyn Future<Output = Result<Response, Box<dyn Error>>> + Send>;
+
+pub type Middleware<T> = Box<dyn Fn(Request, T) -> MiddlewareOutput + Send + Sync>;
+pub type MiddlewareOutput = Box<dyn Future<Output = ()> + Send>;
 
 #[derive(Debug, Clone)]
 pub enum Method {
@@ -95,5 +104,46 @@ impl Request {
 
     pub fn identifier(&self) -> String {
         format!("{} {}", self.method.to_string(), self.path)
+    }
+
+    pub fn method(&self) -> &Method {
+        &self.method
+    }
+
+    pub fn path(&self) -> &String {
+        &self.path
+    }
+
+    pub fn headers(&self) -> &HashMap<String, String> {
+        &self.headers
+    }
+
+    pub fn body(&self) -> &String {
+        &self.body
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Response {
+    pub content: String,
+}
+
+impl Response {
+    pub fn json<T>(data: T) -> Self
+    where
+        T: Serialize,
+    {
+        Self {
+            content: serde_json::to_string(&data).unwrap(),
+        }
+    }
+
+    pub fn raw_text<T>(data: T) -> Self
+    where
+        T: AsRef<str>,
+    {
+        Self {
+            content: data.as_ref().into(),
+        }
     }
 }

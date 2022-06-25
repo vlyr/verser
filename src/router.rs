@@ -1,4 +1,5 @@
 use std::mem;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -9,18 +10,21 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    core::{Method, Request},
-    route::Handler,
-    Response, Route,
+    core::{Method, Middleware, Request, Response, RouteHandler},
+    Route,
 };
 
 pub struct RouterState<T> {
     routes: Vec<Route<T>>,
+    middleware: Vec<Middleware<T>>,
 }
 
 impl<T> Default for RouterState<T> {
     fn default() -> Self {
-        Self { routes: vec![] }
+        Self {
+            routes: vec![],
+            middleware: vec![],
+        }
     }
 }
 
@@ -46,10 +50,22 @@ where
         H: Fn(Request, T) -> Fut + 'static + Send + Sync,
         Fut: Future<Output = Result<Response, Box<dyn std::error::Error>>> + 'static + Send,
     {
-        let handler: Handler<T> = Box::new(move |req, state| Box::new(handler(req, state)));
+        let handler: RouteHandler<T> = Box::new(move |req, state| Box::new(handler(req, state)));
+
         let route = Route::new(path, Method::Get, handler);
 
         self.router_state.routes.push(route);
+    }
+
+    pub fn middleware<Fut, H>(&mut self, middleware: H)
+    where
+        H: Fn(Request, T) -> Fut + 'static + Send + Sync,
+        Fut: Future<Output = ()> + 'static + Send,
+    {
+        let middleware: Middleware<T> =
+            Box::new(move |req, state| Box::new(middleware(req, state)));
+
+        self.router_state.middleware.push(middleware);
     }
 
     pub async fn run<S>(&mut self, addr: S) -> Result<()>
@@ -98,13 +114,17 @@ where
     let buffer = String::from_utf8(buf)?;
 
     if let Some(req) = Request::from_raw(buffer) {
+        for middleware in router_state.middleware.iter() {
+            Pin::from(middleware(req.clone(), user_state.clone())).await
+        }
+
         match router_state
             .routes
             .iter()
             .find(|r| r.identifier() == req.identifier())
         {
             Some(route) => {
-                let response = route.exec(req, user_state.clone()).await;
+                let response = route.exec(req.clone(), user_state.clone()).await;
                 let resp = "HTTP/1.1 200 OK\r\nContent-Type:text/html;charset=utf-8\r\n\r\n";
 
                 stream

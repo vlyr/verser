@@ -1,7 +1,5 @@
 #![feature(async_closure)]
 
-use serde::Serialize;
-
 pub mod router;
 pub use router::Router;
 
@@ -10,34 +8,11 @@ pub use route::Route;
 
 pub mod core;
 
-#[derive(Debug, Clone)]
-pub struct Response {
-    pub content: String,
-}
-
-impl Response {
-    pub fn json<T>(data: T) -> Self
-    where
-        T: Serialize,
-    {
-        Self {
-            content: serde_json::to_string(&data).unwrap(),
-        }
-    }
-
-    pub fn raw_text<T>(data: T) -> Self
-    where
-        T: AsRef<str>,
-    {
-        Self {
-            content: data.as_ref().into(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Response;
+    use serde::Serialize;
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -59,6 +34,10 @@ mod tests {
             state.num += 1;
 
             Ok(Response::json(state.num))
+        });
+
+        router.middleware(async move |req, _state| {
+            println!("{}", req.identifier());
         });
 
         router.run("127.0.0.1:6795").await.unwrap();
